@@ -1,0 +1,355 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "37d944c3",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#Load Libraries\n",
+    "import io\n",
+    "from IPython.display import clear_output\n",
+    "import winsound\n",
+    "import json\n",
+    "import cv2\n",
+    "import requests\n",
+    "from concurrent.futures import ThreadPoolExecutor\n",
+    "from datetime import datetime,timedelta\n",
+    "import time as time\n",
+    "import pandas as pd\n",
+    "\n",
+    "def makeNoise(n=1):\n",
+    "#play beep sound\n",
+    "    frequency = 500  # Set Frequency To 2500 Hertz\n",
+    "    duration = 500  # Set Duration To 1000 ms == 1 second\n",
+    "    for i in range(n):\n",
+    "        winsound.Beep(frequency, duration)\n",
+    "def sleep(strlist,dur=1):\n",
+    "    bar_length = 50\n",
+    "    for i in range(dur):\n",
+    "        clear_output(wait = True)\n",
+    "        for string in strlist:\n",
+    "            print(string)\n",
+    "        block = int(round(bar_length * (i)/dur))\n",
+    "        print(\"Sleep time: [{0}] {1:.0f}/{2:.0f} mins\".format( \"#\" * block + \"-\" * (bar_length - block), i, dur))\n",
+    "        time.sleep(60) # 60s = 1min\n",
+    "    print(\"Sleep time: [{0}] {1:.0f}/{2:.0f} mins\".format( \"#\" * bar_length, dur, dur))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "26bdd5ee",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#create api-key list\n",
+    "apikeystore = [\n",
+    "    'K84124214688957',\n",
+    "    'K84672750088957','K87887256288957','K87576188288957','K84236823888957','K87600253188957','K84253289488957','K84124214688957',\n",
+    "    'K84672750088957','K87887256288957','K87576188288957','K84236823888957','K87600253188957','K84253289488957','K84124214688957',\n",
+    "    'K84672750088957','K87887256288957','K87576188288957','K84236823888957','K87600253188957','K84253289488957',\n",
+    "    ]\n",
+    "        \n",
+    "#api function to convert jpg to text \n",
+    "def ocrtotxt(arg):\n",
+    "    # arg=[fname,api_key]\n",
+    "    fname = arg[0]\n",
+    "    api_key = arg[1]\n",
+    "    \n",
+    "    #pre-process image\n",
+    "    img = cv2.imread(fname)\n",
+    "    h,w,_ = img.shape\n",
+    "    roi = img[0:h,0:w,:]\n",
+    "    _, compressedimage = cv2.imencode(\".jpg\", roi, [1, 90])\n",
+    "    \n",
+    "    # post img-Ocr request\n",
+    "    file_bytes = io.BytesIO(compressedimage)\n",
+    "    result = requests.post('https://api.ocr.space/parse/image',\n",
+    "                              files={fname: file_bytes},\n",
+    "                              data= {'apikey': api_key,\n",
+    "                                     'isTable': True\n",
+    "                                    }\n",
+    "                              )\n",
+    "    return result.content.decode()\n",
+    "    \n",
+    "    \n",
+    "# employ worker to bulk extracting    \n",
+    "def convert_jpgs_to_txts(argumentlist):\n",
+    "#return list of string - Jsontype\n",
+    "    with ThreadPoolExecutor(max_workers=12) as pool:\n",
+    "        result = list(pool.map(ocrtotxt,argumentlist))\n",
+    "    return result"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "03bfdc81",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "#write to Json-text file\n",
+    "def writeRawJson(results):\n",
+    "    #save txt\n",
+    "    fmap = []\n",
+    "    for output in results:\n",
+    "        if ('ParsedResults' in output[1]) and ('ParsedText' in output[1]):\n",
+    "            f = open(file=output[0], mode='w')\n",
+    "            f.write(output[1])\n",
+    "            f.close()\n",
+    "            fmap.append(output[0])\n",
+    "        else:\n",
+    "            fmap.append(\"NAN\")\n",
+    "    #create mapping file\n",
+    "    df.loc[df[df.jpg.isin(jpgnames)].index,'json'] = fmap\n",
+    "\n",
+    "    #save mapping file\n",
+    "    #df.to_csv(json_folder + \"/\" + json_folder.split('/')[-1] + ' jsonfilemap.csv')\n",
+    "    df.to_csv(jpgmappingfname,index=False)\n",
+    "    \n",
+    "#write to Parsed-text file\n",
+    "def writeParseTxt(results):\n",
+    "    #save txt\n",
+    "    fmap = []\n",
+    "    for output in results:\n",
+    "        if ('ParsedResults' in output[1]) and ('ParsedText' in output[1]):\n",
+    "            content = json.loads(output[1]).get('ParsedResults')[0].get('ParsedText')\n",
+    "            f = open(file=output[0], mode='w')\n",
+    "            f.write(content)\n",
+    "            f.close()\n",
+    "            fmap.append(output[0])\n",
+    "        else:\n",
+    "            print(\"error on file: \", output[0] , ',' , output[1] )\n",
+    "            fmap.append(\"NAN\")\n",
+    "            \n",
+    "    #create mapping file\n",
+    "    df.loc[df[df.jpg.isin(jpgnames)].index,'txt'] = fmap\n",
+    "\n",
+    "    #save mapping file\n",
+    "    #df.to_csv(txt_folder + \"/\" + json_folder.split('/')[-1] + ' txtfilemap.csv')\n",
+    "    df.to_csv(jpgmappingfname,index=False)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "48152cce",
+   "metadata": {},
+   "source": [
+    "# INITIATE INPUT"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "19f5df61",
+   "metadata": {},
+   "source": [
+    "As our ocr.space's account only allow 180 requests in hours, we have to devide the works in to times as our capacity\n",
+    "(start_index, end_index = 0, 179)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "418b6108",
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "########### CONTROL BOARD ########################################\n",
+    "jpgmappingfname = 'D:/tmrisc/2021 filemapping.csv'                \n",
+    "json_folder     = 'D:/tmrisc/json/'\n",
+    "txt_folder      = 'D:/tmrisc/txt/'\n",
+    "\n",
+    "########### INITATE ########################################\n",
+    "df = pd.read_csv(jpgmappingfname) # read file\n",
+    "if \"json\" not in df: df['json'] = \"NAN\" # checking available of collumns json\n",
+    "if \"txt\" not in df: df['txt'] = \"NAN\"  # checking available of collumns txt\n",
+    "#create api-key list\n",
+    "apikey_list=[]\n",
+    "maxallowdayreq = 500 # max 500 request/key/day\n",
+    "for key in apikeystore:\n",
+    "    apikey_list = apikey_list + ([key]*maxallowdayreq)\n",
+    "dayreq=0"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c99f7b43",
+   "metadata": {},
+   "source": [
+    "# AUTO-RUN"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "1ac0d184",
+   "metadata": {
+    "scrolled": true
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Work start at 18:52:36\n",
+      "Total 1054/1480 files were converted after seq.7/10\n",
+      "We need sleeping about 60 minutes from 02:04:09\n",
+      "Sleep time: [#################################-----------------] 40/60 mins\n"
+     ]
+    }
+   ],
+   "source": [
+    "# First SetUp\n",
+    "maxseq = int(input('Number of Rounds (hours):   '))\n",
+    "waittime = int(input('the script to run after (mins):   ')) # minutes # setting time elapse to run\n",
+    "sleep(['the converting to start at '+ (datetime.now()+timedelta(minutes=waittime)).strftime('%H:%M:%S')],dur=waittime) # minutes\n",
+    "\n",
+    "automode = True\n",
+    "seq=0\n",
+    "starttime = datetime.now()\n",
+    "totalfile = df.loc[df['txt']=='NAN','jpg'].count()\n",
+    "fileremain = totalfile\n",
+    "#check to re-run\n",
+    "while automode == True and seq<maxseq:  \n",
+    "    seq+=1\n",
+    "    ########################################## Reset ##########################################################################\n",
+    "    #create api&jpg list\n",
+    "    jpg_list=list(df.loc[df['txt']=='NAN','jpg']) # load jpg list\n",
+    "    end = min(len(jpg_list),180)# check to update start:end slicing\n",
+    "    apikeys = apikey_list[dayreq*180:(dayreq+1)*180]\n",
+    "    jpgnames = jpg_list[0:end] # update name lists\n",
+    "    jsonnames =  list(map(lambda jpgname: json_folder + \"/\" + jpgname.split('/')[-1].replace('jpg','txt'),jpgnames)) # update name lists\n",
+    "    txtnames = list(map(lambda jpgname: txt_folder + \"/\" + jpgname.split('/')[-1].replace('jpg','txt'),jpgnames))# update name lists\n",
+    "    api_argument = list(zip(jpgnames,apikeys)) #new list of arguments\n",
+    "    clear_output(wait = True) # clear screen\n",
+    "    print('Work start at: ', starttime.strftime('%H:%M:%S'))\n",
+    "    print('Total {0}/{1} files were converted before seq.{2}/{3}'.format(totalfile - fileremain,totalfile,seq,maxseq)) #report\n",
+    "    ########################################## Run ##########################################################################\n",
+    "    # Run API request\n",
+    "    print('coverting.....')\n",
+    "    results = convert_jpgs_to_txts(api_argument)\n",
+    "    # Write to file\n",
+    "    writeRawJson(list(zip(jsonnames,results)))\n",
+    "    writeParseTxt(list(zip(txtnames,results)))\n",
+    "    #check to re-run\n",
+    "    dayreq +=1\n",
+    "    if end == len(jpg_list) or seq==maxseq:\n",
+    "        automode = False # end auto-mode\n",
+    "    else:\n",
+    "        makeNoise(2) #raise alert\n",
+    "        fileremain = df.loc[df['txt']=='NAN','jpg'].count()\n",
+    "        strlist = ['Work start at '+ starttime.strftime('%H:%M:%S'),\n",
+    "                    'Total {0}/{1} files were converted after seq.{2}/{3}'.format(totalfile - fileremain,totalfile,seq,maxseq),\n",
+    "                  'We need sleeping about 60 minutes from ' + datetime.now().strftime('%H:%M:%S')]\n",
+    "        sleep(strlist,60) # wait 60 mins as API's require\n",
+    "\n",
+    "finishtime = datetime.now()\n",
+    "clear_output(wait = True)\n",
+    "print('Work start  at {0} \\n     finish at {1} '.format(starttime.strftime('%H:%M:%S'),finishtime.strftime('%H:%M:%S')))\n",
+    "print('Total {} files were converted'.format(totalfile))\n",
+    "makeNoise(5) #raise alert to stop"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "a3db3070",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print('today has done {} sequence with the total {} requests to OCR.Space'.format(dayreq,dayreq*180))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "4c039792",
+   "metadata": {},
+   "source": [
+    "# SEMI-AUTO RUN"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "70a6bdc1",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "automode = False\n",
+    "# Check Setting \n",
+    "if automode: \n",
+    "    start_index = end_index + 1 # auto re-Indexing\n",
+    "    end_index = start_index + 180 - 1 # auto re-Indexing\n",
+    "    waittime = int(input('the script to run after (mins):   ')) # minutes # setting time elapse to run\n",
+    "else:\n",
+    "    start_index = int(input('Start from index:   ')) # manual input\n",
+    "    end_index = int(input('End at index:   ')) # manual input\n",
+    "    waittime = int(input('the script to run after (mins):   ')) # minutes # setting time elapse to run\n",
+    "\n",
+    "########################################## Reset ##########################################################################\n",
+    "sleep(['the script to run after {:.0f} minutes'.format(waittime*60)],waittime) # Seconds\n",
+    "end = min(len(jpg_list),end_index+1)# check to update start:end slicing\n",
+    "apikeys = apikey_list[start_index:end]\n",
+    "jpgnames = jpg_list[start_index:end] # update name lists\n",
+    "jsonnames =  list(map(lambda jpgname: json_folder + \"/\" + jpgname.split('/')[-1].replace('jpg','txt'),jpgnames)) # update name lists\n",
+    "txtnames = list(map(lambda jpgname: txt_folder + \"/\" + jpgname.split('/')[-1].replace('jpg','txt'),jpgnames))# update name lists\n",
+    "api_argument = list(zip(jpgnames,apikeys)) #new list of arguments\n",
+    "print('total {0} files [{1}:{2}] to be converted'.format(len(api_argument),start_index,end_index)) #report\n",
+    "########################################## Run ##########################################################################\n",
+    "# Run API request\n",
+    "print('start coverting  [{}:{}] at'.format(start_index,end_index),datetime.now().strftime('%H:%M:%S'))\n",
+    "results = convert_jpgs_to_txts(api_argument)\n",
+    "# Write to file\n",
+    "writeRawJson(list(zip(jsonnames,results)))\n",
+    "writeParseTxt(list(zip(txtnames,results)))\n",
+    "# report\n",
+    "finishtime = datetime.now()\n",
+    "print('finish coverting [{}:{}] at'.format(start_index,end_index),finishtime.strftime('%H:%M:%S'))\n",
+    "#check to re-run\n",
+    "if end == len(jpg_list):\n",
+    "    makeNoise(1) #raise alert\n",
+    "    automode = False # end auto-mode"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "9195bbf9",
+   "metadata": {
+    "scrolled": false
+   },
+   "outputs": [],
+   "source": [
+    "# Report the last converting\n",
+    "automode = False\n",
+    "print('the last coverting is [{}:{}] at'.format(start_index,end_index),finishtime.strftime('%H:%M:%S'))\n",
+    "print('it is {:.0f} mins from the last sending request'.format((datetime.now()-finishtime).seconds/60))"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.9.12"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
